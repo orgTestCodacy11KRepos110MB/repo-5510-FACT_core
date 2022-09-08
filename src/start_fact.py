@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import signal
 import sys
@@ -56,10 +55,6 @@ def _evaluate_optional_args(args: argparse.Namespace):
 
 def _start_component(component: str, args: argparse.Namespace) -> Popen | None:
     script_path = Path(get_src_dir()) / f'../start_fact_{component}'
-    if not script_path.exists():
-        logging.debug(f'{component} not installed')
-        return None
-    logging.info(f'starting {component}')
     optional_args = _evaluate_optional_args(args)
     command = f'{script_path} -l {cfg.logging.logfile} -L {cfg.logging.loglevel} -C {args.config_file} {optional_args}'
     return Popen(split(command))
@@ -71,60 +66,37 @@ def _terminate_process(process: Popen):
             os.kill(process.pid, signal.SIGUSR1)
             process.wait(timeout=60)
         except TimeoutExpired:
-            logging.error('component did not stop in time -> kill')
             process.kill()
         except ProcessLookupError:
             pass
 
 
 def shutdown(*_):
-    logging.info('shutting down...')
-    fact.run = False
-
-
-def _process_is_running(process: Popen) -> bool:
-    try:
-        os.kill(process.pid, 0)
-        if process.poll() is not None:
-            return False
-        return True
-    except ProcessLookupError:
-        return False
+    global run
+    run = False
 
 
 signal.signal(signal.SIGINT, shutdown)
 signal.signal(signal.SIGTERM, shutdown)
 
 
-class FactStarter:
-    run = False
-
-    def main(self):
-        self.run = True
-        args = program_setup(PROGRAM_NAME, PROGRAM_DESCRIPTION)
-        db_process = _start_component('db', args)
-        sleep(2)
-        frontend_process = _start_component('frontend', args)
-        backend_process = _start_component('backend', args)
-        sleep(2)
-        if backend_process is not None and not _process_is_running(backend_process):
-            logging.critical('Backend did not start. Shutting down...')
-            self.run = False
-
-        while self.run:
-            sleep(1)
-            if args.testing:
-                break
-
-        logging.debug('shutdown backend')
-        _terminate_process(backend_process)
-        logging.debug('shutdown frontend')
-        _terminate_process(frontend_process)
-        logging.debug('shutdown db')
-        _terminate_process(db_process)
-
-
 if __name__ == '__main__':
-    fact = FactStarter()
-    fact.main()
-    sys.exit(0)
+    process_list = []
+    run = True
+    args = program_setup(PROGRAM_NAME, PROGRAM_DESCRIPTION)
+
+    db_process = _start_component('db', args)
+    sleep(2)
+    frontend_process = _start_component('frontend', args)
+    backend_process = _start_component('backend', args)
+
+    while run:
+        sleep(1)
+        if args.testing:
+            break
+
+    _terminate_process(backend_process)
+    _terminate_process(frontend_process)
+    _terminate_process(db_process)
+
+    sys.exit()
