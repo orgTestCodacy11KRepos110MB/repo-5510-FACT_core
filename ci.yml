@@ -1,0 +1,86 @@
+image: ubuntu/focal
+shell: true
+# cat $(fd apt-pkgs) | sort | uniq
+packages:
+  - docker.io
+  - sudo
+  - apt-transport-https
+  - autoconf
+  - automake
+  - binutils
+  - bison
+  - build-essential
+  - clamav
+  - clamav-daemon
+  - clamdscan
+  - device-tree-compiler
+  - file
+  - flex
+  - git
+  - libfuzzy-dev
+  - libjpeg-dev
+  - liblua5.3-dev
+  - libmagic-dev
+  - libssl-dev
+  - libtool
+  - lua5.3
+  - luarocks
+  - openssl
+  - pkg-config
+  - python3
+  - python3-dev
+  - redis
+  - shellcheck
+  - unzip
+  - xvfb
+  - yara
+
+sources:
+  - https://github.com/fkie-cad/FACT_core.git#sourcehut-ci
+tasks:
+  - setup: |
+      sudo usermod -aG docker $(id -nu)
+      sudo systemctl start docker
+      sudo sysctl -w fs.file-max=4096
+      sudo timedatectl set-timezone Europe/Berlin
+      sudo timedatectl set-timezone Europe/Berlin
+      # FIXME Some tests use localhost as a database host
+      echo "127.0.0.1	localhost" | sudo tee -a /etc/hosts
+  - pre-install: |
+      cd FACT_core
+      src/install/pre_install.sh
+  - common: |
+      cd FACT_core
+      src/install.py --common --statistic_cronjob -d --log_level DEBUG
+  - frontend: |
+      cd FACT_core
+      src/install.py --frontend --no-common --no_radare --nginx -d --log_level DEBUG
+  - db: |
+      cd FACT_core
+      src/install.py --db --no-common -d --log_level DEBUG
+  - backend: |
+      cd FACT_core
+      src/install.py --backend --no-common -d --log_level DEBUG
+  - start-services: |
+      sudo systemctl start docker
+      sudo systemctl start postgresql
+      sudo systemctl start redis
+  - initialize-db: |
+      cd FACT_core
+      src/init_postgres.py
+  # We have to split the testing to avoid it crashing
+  - test-unit: |
+      cd FACT_core
+      pytest src/test/unit/ || true
+  - test-integration: |
+      cd FACT_core
+      pytest src/test/integration/helperFunctions || true
+      pytest src/test/integration/intercom || true
+      # Somehow the tests work indipendently but not all at once
+      for file in $(find src/test/integration/scheduler -name "*.py"); do pytest $file; done
+      pytest src/test/integration/statistic || true
+      pytest src/test/integration/storage || true
+      pytest src/test/integration/web_interface || true
+  - test-acceptance: |
+      cd FACT_core
+      pytest src/test/acceptance/ || true
