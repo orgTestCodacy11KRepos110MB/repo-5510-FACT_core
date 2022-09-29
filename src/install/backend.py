@@ -35,7 +35,7 @@ def main(skip_docker, distribution):
     install_pip_packages(PIP_DEPENDENCIES)
 
     # install yara
-    _install_yara()
+    #_install_yara()
 
     _install_checksec()
 
