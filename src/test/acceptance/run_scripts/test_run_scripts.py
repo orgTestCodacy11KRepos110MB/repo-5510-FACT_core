@@ -9,6 +9,8 @@ import init_postgres
 import update_statistic
 from helperFunctions.fileSystem import get_src_dir
 
+pytest.skip("Makes pytest hang after test completion", allow_module_level=True)
+
 
 @pytest.mark.parametrize('script, expected_str', [
     ('start_fact.py', 'FACT Starter'),
