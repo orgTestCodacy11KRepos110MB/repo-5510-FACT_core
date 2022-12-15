@@ -1,29 +1,36 @@
 import urllib.parse
 from base64 import standard_b64encode
 
-from test.acceptance.base import TestAcceptanceBaseWithDb
+import pytest
+
+from storage.fsorganizer import FSOrganizer
 from test.common_helper import create_test_firmware
 
+test_fw = create_test_firmware(device_class='test class', device_name='test device', vendor='test vendor')
 
-class TestRestDownloadFirmware(TestAcceptanceBaseWithDb):
-    def setUp(self):
-        super().setUp()
-        self.test_fw = create_test_firmware(device_class='test class', device_name='test device', vendor='test vendor')
 
-    def _rest_search(self):
-        query = '{"device_class": "test class"}'
-        rv = self.test_client.get(f'/rest/firmware?query={urllib.parse.quote(query)}', follow_redirects=True)
-        assert self.test_fw.uid.encode() in rv.data, 'test firmware not found in rest search'
+@pytest.fixture
+def fsorganizer():
+    return FSOrganizer()
 
-    def _rest_download(self):
-        rv = self.test_client.get(f'/rest/binary/{self.test_fw.uid}', follow_redirects=True)
-        assert standard_b64encode(self.test_fw.binary) in rv.data, 'rest download response incorrect'
-        assert f'"file_name": "{self.test_fw.file_name}"'.encode() in rv.data, 'rest download response incorrect'
-        assert f'"SHA256": "{self.test_fw.sha256}"'.encode() in rv.data, 'rest download response incorrect'
 
-    def test_run_from_upload_to_show_analysis(self):
-        self.db_backend.add_object(self.test_fw)
-        self.fs_organizer.store_file(self.test_fw)
+def _rest_search(test_client):
+    query = '{"device_class": "test class"}'
+    rv = test_client.get(f'/rest/firmware?query={urllib.parse.quote(query)}', follow_redirects=True)
+    assert test_fw.uid.encode() in rv.data, 'test firmware not found in rest search'
 
-        self._rest_search()
-        self._rest_download()
+
+def _rest_download(test_client):
+    rv = test_client.get(f'/rest/binary/{test_fw.uid}', follow_redirects=True)
+    assert standard_b64encode(test_fw.binary) in rv.data, 'rest download response incorrect'
+    assert f'"file_name": "{test_fw.file_name}"'.encode() in rv.data, 'rest download response incorrect'
+    assert f'"SHA256": "{test_fw.sha256}"'.encode() in rv.data, 'rest download response incorrect'
+
+
+@pytest.mark.usefixtures('intercom_backend_binding')
+def test_run_from_upload_to_show_analysis(test_client, backend_db, fsorganizer):
+    backend_db.add_object(test_fw)
+    fsorganizer.store_file(test_fw)
+
+    _rest_search(test_client)
+    _rest_download(test_client)
