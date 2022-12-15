@@ -1,11 +1,17 @@
 # pylint: disable=redefined-outer-name
 import dataclasses
+from multiprocessing import Event, Queue, Value
 from typing import List, NamedTuple, Type, TypeVar
 
 import pytest
 from pydantic import BaseModel, Extra
+from pydantic.dataclasses import dataclass
+from pytest import MonkeyPatch
 
 import config
+from scheduler.analysis import AnalysisScheduler
+from scheduler.comparison_scheduler import ComparisonScheduler
+from scheduler.unpacking_scheduler import UnpackingScheduler
 from storage.db_connection import ReadOnlyConnection, ReadWriteConnection
 from storage.db_interface_admin import AdminDbInterface
 from storage.db_interface_backend import BackendDbInterface
@@ -15,7 +21,10 @@ from storage.db_interface_frontend import FrontEndDbInterface
 from storage.db_interface_frontend_editing import FrontendEditingDbInterface
 from storage.db_interface_stats import StatsUpdateDbInterface
 from storage.db_setup import DbSetup
+from storage.unpacking_locks import UnpackingLockManager
 from test.common_helper import clear_test_tables, setup_test_tables
+from test.integration.common import MockDbInterface as BackEndDbInterfaceMock
+from test.integration.common import MockFSOrganizer as FSOrganizerMock
 
 T = TypeVar('T')
 
@@ -189,7 +198,9 @@ def database_interfaces(
     finally:
         # clear rows from test db between tests
         _database_interfaces.admin.connection.base.metadata.drop_all(bind=_database_interfaces.admin.connection.engine)
-        _database_interfaces.admin.connection.base.metadata.create_all(bind=_database_interfaces.admin.connection.engine)
+        _database_interfaces.admin.connection.base.metadata.create_all(
+            bind=_database_interfaces.admin.connection.engine
+        )
         # clean intercom mock
         if hasattr(_database_interfaces.admin.intercom, 'deleted_files'):
             _database_interfaces.admin.intercom.deleted_files.clear()
@@ -235,3 +246,231 @@ def comparison_db(database_interfaces):
 def stats_update_db(database_interfaces):
     """Convinience fixture. Equivalent to ``database_interfaces.stats_update``."""
     yield database_interfaces.stats_update
+
+
+@pytest.fixture
+def post_analysis_queue() -> Queue:
+    """A Queue in which the arguments of :py:func:`AnalysisScheduler.post_analysis` are put whenever it is called."""
+    yield Queue()
+
+
+@pytest.fixture
+def pre_analysis_queue() -> Queue:
+    """A Queue in which the arguments of :py:func:`AnalysisScheduler.pre_analysis` are put whenever it is called."""
+    yield Queue()
+
+
+@pytest.fixture
+def analysis_finished_event() -> Event:
+    """An event that is set once the :py:func:`analysis_scheduler` has analyzed
+    :py:attribute:`SchedulerTestConfig.items_to_analyze` items.
+
+    .. seealso::
+
+       The documentation of :py:class:`SchedulerTestConfig`."""
+    yield Event()
+
+
+@pytest.fixture
+def analysis_finished_counter() -> Value:
+    """A :py:class:`Value` counting how many analysies are finished."""
+    return Value('i', 0)
+
+
+@pytest.fixture
+def analysis_scheduler(
+    request,
+    pre_analysis_queue,
+    post_analysis_queue,
+    analysis_finished_event,
+    analysis_finished_counter,
+) -> AnalysisScheduler:
+    """Returns an instance of :py:class:`~scheduler.analysis.AnalysisScheduler`.
+    The scheduler has some extra testing features. See :py:class:`SchedulerTestConfig` for the features.
+    """
+    test_config = merge_markers(request, 'SchedulerTestConfig', SchedulerTestConfig.get_subclass_from_request(request))
+
+    # FIXME Don't patch
+    # The reason for patching is documented in :py:func:`AnalysisScheduler.start`.
+    with MonkeyPatch.context() as mkp:
+        mkp.setattr(AnalysisScheduler, '_load_plugins', lambda _: None)
+        _analysis_scheduler = AnalysisScheduler(
+            pre_analysis=lambda _: None,
+            post_analysis=lambda *_: None,
+            unpacking_locks=UnpackingLockManager(),
+        )
+
+    _analysis_scheduler.db_backend_service = test_config.backend_db_class()
+
+    def _pre_analysis_hook(fw):
+        pre_analysis_queue.put(fw)
+        if test_config.pipeline:
+            _analysis_scheduler.db_backend_service.add_object(fw)
+
+    _analysis_scheduler.pre_analysis = _pre_analysis_hook
+
+    def _post_analysis_hook(*args):
+        post_analysis_queue.put(args)
+        analysis_finished_counter.value += 1
+        # We use == here insead of >= to not set the thing when items_to_analyze is 0
+        if analysis_finished_counter.value == test_config.items_to_analyze:
+            analysis_finished_event.set()
+
+        if test_config.pipeline:
+            _analysis_scheduler.db_backend_service.add_analysis(*args)
+
+    # test_unpack_and_analyse.py
+    _analysis_scheduler.post_analysis = _post_analysis_hook
+
+    def _instanciate_plugin_wo_starting(plugin_class):
+        with MonkeyPatch.context() as mkp:
+            mkp.setattr(plugin_class, 'start', lambda _: None)
+
+        return plugin_class
+
+    # FIXME This is a hack
+    # We want to load plugins but don't actually start them
+    # Due to a bug which is documented in AnalysisScheduler._load_plugins we have to do it really wired
+    with MonkeyPatch.context() as mkp:
+        if not test_config.start_processes:
+            mkp.setattr(_analysis_scheduler, '_instanciate_plugin', _instanciate_plugin_wo_starting)
+        _analysis_scheduler._load_plugins()
+
+    if test_config.start_processes:
+        _analysis_scheduler.start()
+
+    yield _analysis_scheduler
+    # TODO scope: Maybe get inspired by the database_interface fixture.
+    # Have a module scoped thing, then have a function scoped thing that makes sure that all queues are reset.
+    # This would prevent calling exec and fork for every test function
+    # But we have to make sure that the config is the one set for the very specific function in
+
+    if test_config.start_processes:
+        _analysis_scheduler.shutdown()
+
+
+@pytest.fixture
+def post_unpack_queue() -> Queue:
+    """A queue that is filled with the arguments of post_unpack of the unpacker"""
+    yield Queue()
+
+
+@pytest.fixture
+def unpacking_scheduler(request, post_unpack_queue) -> UnpackingScheduler:
+    """Returns an instance of :py:class:`~scheduler.unpacking_scheduler.UnpackingScheduler`.
+    The scheduler has some extra testing features. See :py:class:`SchedulerTestConfig` for the features.
+    """
+    test_config = merge_markers(request, 'SchedulerTestConfig', SchedulerTestConfig.get_subclass_from_request(request))
+    if test_config.pipeline:
+        _analysis_scheduler = request.getfixturevalue('analysis_scheduler')
+
+    _unpacking_scheduler = UnpackingScheduler(
+        post_unpack=lambda _: None,
+        fs_organizer=None,
+        # TODO must this be the same as in analysis_scheduler?
+        unpacking_locks=UnpackingLockManager(),
+    )
+
+    _unpacking_scheduler.fs_organizer = test_config.fs_organizer_class()
+
+    def _post_unpack_hook(fw):
+        post_unpack_queue.put(fw)
+        if test_config.pipeline:
+            _analysis_scheduler.start_analysis_of_object(fw)
+
+    _unpacking_scheduler.post_unpack = _post_unpack_hook
+
+    if test_config.start_processes:
+        _unpacking_scheduler.start()
+
+    yield _unpacking_scheduler
+
+    if test_config.start_processes:
+        _unpacking_scheduler.shutdown()
+
+
+@pytest.fixture
+def comparison_finished_event() -> Event:
+    """The retunred event is set once the comparison_scheduler is finished comparing.
+    Note that the event must be reset if you want to compare multiple firmwares in one test.
+    """
+    yield Event()
+
+
+@pytest.fixture
+def comparison_scheduler(request, comparison_finished_event) -> ComparisonScheduler:
+    """Returns an instance of :py:class:`~scheduler.comparison_scheduler.ComparisonScheduler`.
+    The scheduler has some extra testing features. See :py:class:`SchedulerTestConfig` for the features.
+    """
+    test_config = merge_markers(request, 'SchedulerTestConfig', SchedulerTestConfig.get_subclass_from_request(request))
+    _comparison_scheduler = ComparisonScheduler()
+
+    _comparison_scheduler.db_interface = test_config.comparison_db_class()
+
+    def _callback_hook():
+        comparison_finished_event.set()
+
+    _comparison_scheduler.callback = _callback_hook
+
+    if test_config.start_processes:
+        _comparison_scheduler.start()
+
+    yield _comparison_scheduler
+
+    if test_config.start_processes:
+        _comparison_scheduler.shutdown()
+
+
+@dataclass
+class SchedulerTestConfig:
+    """A declarative class that describes the desired behavior for the fixtures :py:func:`~analysis_finished_event`,
+     :py:func:`unpacking_scheduler` and :py:func:`comparison_scheduler`.
+
+    The fixtures don't do any assertions, they MUST be done by the test using the fixtures.
+    """
+
+    #: The amount of items that the :py:class:`~scheduler.analysis.AnalysisScheduler` must analyze before
+    #: :py:func:`analysis_finished_event` gets set.
+    items_to_analyze: int = 0
+    #: Set the class that is used as :py:class:`~storage.db_interface_backend.BackendDbInterface`.
+    #: This can be either a mocked class or the actual :py:class:`~storage.db_interface_backend.BackendDbInterface`.
+    #: This is used by the :py:func:`analysis_scheduler`
+    backend_db_class: Type = BackEndDbInterfaceMock
+    #: Set the class that is used as :py:class:`~storage.db_interface_comparison.ComparisonDbInterface`.
+    #: This can be either a mocked class or the actual :py:class:`~storage.db_interface_comparison.ComparisonDbInterface`.
+    #: This is used by the :py:func:`comparison_scheduler`
+    comparison_db_class: Type = ComparisonDbInterface
+    #: Set the class that is used as :py:class:`~storage.fsorganizer.FSOrganizer`.
+    #: This can be either a mocked class or the actual :py:class:`~storage.fsorganizer.FSOrganizer`.
+    #: This is used by the :py:func:`unpacking_scheduler`
+    fs_organizer_class: Type = FSOrganizerMock
+    #: If set to ``True`` the :py:func:`unpacking_scheduler` and :py:func:`analysis_scheduler` are connected via their
+    #: hooks.
+    #: To be percise the analysis is started after unpacking.
+    #: Also the objects to be analysed and the finished analysis is added to the backend database.
+    pipeline: bool = False
+    #: If set to ``False`` no processes will be started.
+    start_processes: bool = True
+
+    @staticmethod
+    def get_subclass_from_request(request: pytest.FixtureRequest) -> Type['SchedulerTestConfig']:
+        err = ValueError(f'{request.module} is neither a unit,acceptance or integration test')
+
+        modules = request.module.__name__.split('.')
+        if len(modules) < 2:
+            raise err
+        test_type = modules[1]
+        if test_type == 'unit':
+            from test.unit.conftest import SchedulerUnitTestConfig
+
+            return SchedulerUnitTestConfig
+        elif test_type == 'acceptance':
+            from test.acceptance.conftest import SchedulerAcceptanceTestConfig
+
+            return SchedulerAcceptanceTestConfig
+        elif test_type == 'integration':
+            from test.integration.conftest import SchedulerIntegrationTestConfig
+
+            return SchedulerIntegrationTestConfig
+        else:
+            raise err

@@ -51,4 +51,6 @@ markers = [
     "AnalysisPluginTestConfig: Configure the analysis_plugin fixture",
     "cfg_defaults: Overwrite defaults for the testing config",
     "WebInterfaceUnitTestConfig: Configure the web_interface fixture",
+    "SchedulerTestConfig: Configure the analysis_scheduler, comparison_scheduler and unpacking_scheduler",
+
 ]

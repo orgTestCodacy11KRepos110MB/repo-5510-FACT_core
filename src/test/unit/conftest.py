@@ -1,11 +1,12 @@
 # pylint: disable=no-self-use
+
 from typing import Type
 
 import pytest
 from pydantic.dataclasses import dataclass
 
 from test.common_helper import TEST_FW, TEST_TEXT_FILE, CommonDatabaseMock
-from test.conftest import merge_markers
+from test.conftest import SchedulerTestConfig, merge_markers
 from web_interface.frontend_main import WebFrontEnd
 from web_interface.security.authentication import add_flask_security_to_app
 
@@ -150,3 +151,14 @@ def web_frontend(request, monkeypatch, intercom_task_list) -> WebFrontEnd:
 def test_client(web_frontend):
     """Shorthand for ``web_frontend.app.test_client``"""
     yield web_frontend.app.test_client()
+
+
+class _BackendDbInterfaceMock:
+    def get_analysis(self, *_):
+        pass
+
+
+@dataclass
+class SchedulerUnitTestConfig(SchedulerTestConfig):
+    backend_db_class: Type = _BackendDbInterfaceMock
+    start_processes: bool = False
