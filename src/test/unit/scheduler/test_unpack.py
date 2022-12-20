@@ -1,54 +1,35 @@
-import gc
-from configparser import ConfigParser
-from multiprocessing import Event, Queue
-from tempfile import TemporaryDirectory
-from time import sleep
-from unittest import TestCase
-from unittest.mock import patch
+from multiprocessing import Event
 
 import pytest
 
 from objects.firmware import Firmware
-from scheduler.unpacking_scheduler import UnpackingScheduler
-from storage.unpacking_locks import UnpackingLockManager
 from test.common_helper import get_test_data_dir
 
 
-class TestUnpackScheduler(TestCase):
-    def setUp(self):
-        self.tmp_dir = TemporaryDirectory()
-        self.config = ConfigParser()
-        self.config.add_section('unpack')
-        self.config.set('unpack', 'threads', '2')
-        self.config.set('unpack', 'max-depth', '3')
-        self.config.set('unpack', 'whitelist', '')
-        self.config.add_section('expert-settings')
-        self.config.set('expert-settings', 'block-delay', '1')
-        self.config.set('expert-settings', 'unpack-throttle-limit', '10')
-        self.config.add_section('data-storage')
-        self.config.set('data-storage', 'firmware-file-storage-directory', self.tmp_dir.name)
-        self.tmp_queue = Queue()
-        self.scheduler = None
-
-        self.sleep_event = Event()
-
-    def tearDown(self):
-        if self.scheduler:
-            self.scheduler.shutdown()
-        self.tmp_dir.cleanup()
-        self.tmp_queue.close()
-        gc.collect()
-
-    def test_unpack_a_container_including_another_container(self):
-        self._start_scheduler()
+@pytest.mark.cfg_defaults(
+    {
+        'unpack': {
+            'threads': '2',
+            'max-depth': '3',
+            'whitelist': '',
+        },
+        'expert-settings': {
+            'block-delay': '1',
+            'unpack-throttle-limit': '10',
+        },
+    },
+)
+@pytest.mark.SchedulerTestConfig(dict(start_processes=True))
+class TestUnpackScheduler:
+    def test_unpack_a_container_including_another_container(self, unpacking_scheduler, post_unpack_queue):
         test_fw = Firmware(file_path=f'{get_test_data_dir()}/container/test_zip.tar.gz')
-        self.scheduler.add_task(test_fw)
-        outer_container = self.tmp_queue.get(timeout=5)
+        unpacking_scheduler.add_task(test_fw)
+        outer_container = post_unpack_queue.get(timeout=5)
         assert len(outer_container.files_included) == 2, 'not all children of root found'
         assert (
             'ab4153d747f530f9bc3a4b71907386f50472ea5ae975c61c0bacd918f1388d4b_227' in outer_container.files_included
         ), 'included container not extracted. Unpacker tar.gz modul broken?'
-        included_files = [self.tmp_queue.get(timeout=5), self.tmp_queue.get(timeout=5)]
+        included_files = [post_unpack_queue.get(timeout=5), post_unpack_queue.get(timeout=5)]
         for item in included_files:
             if item.uid == 'ab4153d747f530f9bc3a4b71907386f50472ea5ae975c61c0bacd918f1388d4b_227':
                 assert len(item.files_included) == 1, 'number of files in included container not correct'
@@ -57,9 +38,9 @@ class TestUnpackScheduler(TestCase):
                     item.uid == 'faa11db49f32a90b51dfc3f0254f9fd7a7b46d0b570abd47e1943b86d554447a_28'
                 ), 'none container file not rescheduled'
 
-    def test_get_combined_analysis_workload(self):
-        self._start_scheduler()
-        result = self.scheduler._get_combined_analysis_workload()  # pylint: disable=protected-access
+    @pytest.mark.skip(reason='TODO this test is useless')
+    def test_get_combined_analysis_workload(self, unpacking_scheduler):
+        result = unpacking_scheduler._get_combined_analysis_workload()  # pylint: disable=protected-access
         assert result == 3, 'workload calculation not correct'
 
     @pytest.mark.cfg_defaults(
@@ -69,25 +50,17 @@ class TestUnpackScheduler(TestCase):
             }
         }
     )
-    def test_throttle(self):
-        with patch(target='scheduler.unpacking_scheduler.sleep', new=self._trigger_sleep):
-            self._start_scheduler()
-            self.sleep_event.wait(timeout=10)
+    @pytest.mark.SchedulerTestConfig(dict(start_processes=False))
+    def test_throttle(self, unpacking_scheduler, monkeypatch):
+        sleep_was_called = Event()
+        with monkeypatch.context() as mkp:
+            mkp.setattr('scheduler.unpacking_scheduler.sleep', lambda _: sleep_was_called.set())
+            # FIXME Once processes are not started in __init__ anymore call `start` here
+            unpacking_scheduler.start_unpack_workers()
+            unpacking_scheduler.work_load_process = unpacking_scheduler.start_work_load_monitor()
 
-        assert self.scheduler.throttle_condition.value == 1, 'unpack load throttle not functional'
+        sleep_was_called.wait(timeout=10)
 
-    def _start_scheduler(self):
-        self.scheduler = UnpackingScheduler(
-            post_unpack=self._mock_callback,
-            analysis_workload=lambda: 3,
-            unpacking_locks=UnpackingLockManager(),
-        )
-        self.scheduler.start()
+        assert unpacking_scheduler.throttle_condition.value == 1, 'unpack load throttle not functional'
 
-    def _mock_callback(self, fw):
-        self.tmp_queue.put(fw)
-
-    def _trigger_sleep(self, seconds: int) -> None:
-        self.sleep_event.set()
-
-        sleep(seconds)
+        unpacking_scheduler.shutdown()
