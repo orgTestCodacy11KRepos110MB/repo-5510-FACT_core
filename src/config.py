@@ -66,6 +66,7 @@ class Logging(BaseModel):
     Config = _PydanticConfigExtraForbid
     logfile: str
     loglevel: str
+    loglevel: str = 'WARNING'
 
 
 class Unpack(BaseModel):
