@@ -3,11 +3,13 @@ import os
 import signal
 from time import sleep
 
+import config
+
 try:
     import psutil
     import psycopg2  # pylint: disable=unused-import  # noqa: F401  # new dependency of FACT>=4.0
 
-    from helperFunctions.program_setup import program_setup
+    from helperFunctions.program_setup import get_logging_config, setup_argparser, setup_logging
     from statistic.work_load import WorkLoadStatistic
 except (ImportError, ModuleNotFoundError):
     logging.exception(
@@ -42,7 +44,10 @@ class FactBase:
             signal.signal(signal.SIGINT, self.shutdown_listener)
             signal.signal(signal.SIGTERM, self.shutdown_listener)
 
-        self.args = program_setup(self.PROGRAM_NAME, self.PROGRAM_DESCRIPTION, self.COMPONENT)
+        self.args = setup_argparser(self.PROGRAM_NAME, self.PROGRAM_DESCRIPTION)
+        config.load(self.args.config_file)
+        logfile, loglevel = get_logging_config(self.args, self.COMPONENT)
+        setup_logging(logfile, loglevel)
         self.work_load_stat = WorkLoadStatistic(component=self.COMPONENT)
 
     def shutdown_listener(self, signum, _):

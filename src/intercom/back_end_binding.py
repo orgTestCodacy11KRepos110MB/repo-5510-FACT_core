@@ -9,7 +9,6 @@ from typing import Callable, Optional, Tuple, Type
 
 from config import cfg
 from helperFunctions.process import stop_processes
-from helperFunctions.program_setup import get_log_file_for_component
 from helperFunctions.yara_binary_search import YaraBinarySearchScanner
 from intercom.common_redis_binding import InterComListener, InterComListenerAndResponder, InterComRedisInterface
 from objects.firmware import Firmware
@@ -246,7 +245,7 @@ class InterComBackEndLogsTask(InterComListenerAndResponder):
     OUTGOING_CONNECTION_TYPE = 'logs_task_resp'
 
     def get_response(self, task):
-        backend_logs = Path(get_log_file_for_component('backend'))
+        backend_logs = Path(cfg.logging.logfile_backend)
         if backend_logs.is_file():
             return backend_logs.read_text().splitlines()[-100:]
         return []

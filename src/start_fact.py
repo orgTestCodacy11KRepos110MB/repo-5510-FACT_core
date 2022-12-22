@@ -27,14 +27,16 @@ from shlex import split
 from subprocess import Popen, TimeoutExpired
 from time import sleep
 
+import config
+from config import cfg
+
 try:
     import fact_base  # pylint: disable=unused-import  # noqa: F401  # just check if FACT is installed
 except ImportError:
     sys.exit(1)
 
-from config import cfg
 from helperFunctions.fileSystem import get_src_dir
-from helperFunctions.program_setup import program_setup
+from helperFunctions.program_setup import setup_argparser
 
 PROGRAM_NAME = 'FACT Starter'
 PROGRAM_DESCRIPTION = 'This script starts all installed FACT components'
@@ -42,10 +44,6 @@ PROGRAM_DESCRIPTION = 'This script starts all installed FACT components'
 
 def _evaluate_optional_args(args: argparse.Namespace):
     optional_args = ''
-    if args.debug:
-        optional_args += ' -d'
-    if args.silent:
-        optional_args += ' -s'
     if args.testing:
         optional_args += ' -t'
     if args.no_radare:
@@ -56,8 +54,16 @@ def _evaluate_optional_args(args: argparse.Namespace):
 def _start_component(component: str, args: argparse.Namespace) -> Popen | None:
     script_path = Path(get_src_dir()) / f'../start_fact_{component}'
     optional_args = _evaluate_optional_args(args)
-    command = f'{script_path} -l {cfg.logging.logfile} -L {cfg.logging.loglevel} -C {args.config_file} {optional_args}'
-    return Popen(split(command))
+    command = f'''{script_path} \
+        -l {getattr(cfg.logging, f"logfile_{component}")} \
+        -L {cfg.logging.loglevel} \
+        '''
+
+    if args.config_file is not None:
+        command += f'-C {args.config_file} {optional_args}'
+
+    p = Popen(split(command))
+    return p
 
 
 def _terminate_process(process: Popen):
@@ -83,9 +89,10 @@ signal.signal(signal.SIGTERM, shutdown)
 if __name__ == '__main__':
     process_list = []
     run = True
-    args = program_setup(PROGRAM_NAME, PROGRAM_DESCRIPTION)
+    args = setup_argparser(PROGRAM_NAME, PROGRAM_DESCRIPTION)
+    config.load(args.config_file)
 
-    db_process = _start_component('db', args)
+    db_process = _start_component('database', args)
     sleep(2)
     frontend_process = _start_component('frontend', args)
     backend_process = _start_component('backend', args)

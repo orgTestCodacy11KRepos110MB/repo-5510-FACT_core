@@ -79,7 +79,9 @@ def _get_test_config_tuple(defaults: dict | None = None) -> tuple[Config, Config
             'unpack_throttle_limit': '50',
         },
         'logging': {
-            'logfile': '/tmp/fact_main.log',
+            'logfile-backend': '/tmp/fact_backend.log',
+            'logfile-frontend': '/tmp/fact_frontend.log',
+            'logfile-database': '/tmp/fact_database.log',
             'loglevel': 'WARNING',
         },
         'unpack': {'max-depth': '10', 'memory-limit': '2048', 'threads': '4', 'whitelist': ''},

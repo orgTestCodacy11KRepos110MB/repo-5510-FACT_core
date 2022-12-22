@@ -19,13 +19,7 @@ class TestShowLogs(WebInterfaceTest):
     def setup_class(cls, *_, **__):
         super().setup_class(intercom_mock=MockIntercom)
 
-    @pytest.mark.cfg_defaults(
-        {
-            'logging': {
-                'logfile': 'NonExistentFile',
-            }
-        }
-    )
+    @pytest.mark.cfg_defaults({'logging': {'logfile-backend': 'NonExistentFile'}})
     def test_backend_available(self):
         rv = self.test_client.get('/admin/logs')
         assert b'String1' in rv.data
@@ -33,7 +27,7 @@ class TestShowLogs(WebInterfaceTest):
     @pytest.mark.cfg_defaults(
         {
             'logging': {
-                'logfile': str(Path(helperFunctions.fileSystem.get_src_dir()) / 'test/data/logs'),
+                'logfile-frontend': str(Path(helperFunctions.fileSystem.get_src_dir()) / 'test/data/logs_frontend')
             }
         }
     )

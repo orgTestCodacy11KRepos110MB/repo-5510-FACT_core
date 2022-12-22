@@ -17,20 +17,13 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 '''
 
-import logging
 import pickle
 import sys
 from pathlib import Path
 
 import config
-from helperFunctions.program_setup import set_logging_cfg_from_args, setup_logging
+from helperFunctions.program_setup import get_logging_config, setup_logging
 from web_interface.frontend_main import WebFrontEnd
-
-
-def _get_console_output_level(debug_flag):
-    if debug_flag:
-        return logging.DEBUG
-    return logging.INFO
 
 
 def create_web_interface():
@@ -40,8 +33,9 @@ def create_web_interface():
         args = pickle.loads(args_path.read_bytes())
         config_file = getattr(args, 'config_file', None)
         config.load(config_file)
-        set_logging_cfg_from_args(args)
-    setup_logging(args, component='frontend')
+
+    logfile, loglevel = get_logging_config(args, 'frontend')
+    setup_logging(logfile, loglevel)
     return WebFrontEnd()
 
 
