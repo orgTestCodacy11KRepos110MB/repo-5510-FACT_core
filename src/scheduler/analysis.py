@@ -183,6 +183,9 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         return plugin_list
 
     # ---- plugin initialization ----
+    # FIXME remove this hack
+    def _instanciate_plugin(self, plugin_class):
+        return plugin_class()
 
     def _load_plugins(self):
         source = import_plugins('analysis.plugins', 'plugins/analysis')
@@ -194,7 +197,7 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
                 # be missing dependencies. So if anything goes wrong we want to inform the user about it
                 logging.error(f'Could not import plugin {plugin_name} due to exception', exc_info=True)
             else:
-                self.analysis_plugins[plugin.AnalysisPlugin.NAME] = plugin.AnalysisPlugin()
+                self.analysis_plugins[plugin.AnalysisPlugin.NAME] = self._instanciate_plugin(plugin.AnalysisPlugin)
 
     def get_plugin_dict(self) -> dict:
         '''
