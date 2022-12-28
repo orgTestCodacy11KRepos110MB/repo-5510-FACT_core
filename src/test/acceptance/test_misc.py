@@ -120,7 +120,7 @@ def test_misc(
         unpacking_workload=unpacking_scheduler.get_scheduled_workload(),
         analysis_workload=analysis_scheduler.get_scheduled_workload(),
     )
-    analysis_finished_event.wait(timeout=10)
+    assert analysis_finished_event.wait(timeout=10)
     _show_system_monitor(test_client)
 
     stats_updater.update_all_stats()

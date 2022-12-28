@@ -57,9 +57,9 @@ def test_run_from_upload_to_show_analysis(
     _rest_upload_firmware(test_client, test_fw_a)
     # TODO Probably fw_c prevents shutting down here too
     _rest_upload_firmware(test_client, test_fw_c)
-    analysis_finished_event.wait(timeout=20)
+    assert analysis_finished_event.wait(timeout=20)
     _rest_search(test_client, test_fw_a)
     _rest_search(test_client, test_fw_c)
     _rest_start_compare(test_client, test_fw_a, test_fw_c)
-    comparison_finished_event.wait(timeout=20)
+    assert comparison_finished_event.wait(timeout=20)
     _rest_get_compare(test_client, test_fw_a, test_fw_c)

@@ -63,7 +63,7 @@ def _rest_check_new_analysis_exists(test_client):
 @pytest.mark.SchedulerTestConfig(dict(items_to_analyze=4 * 3))  # container including 3 files times 3 plugins
 def test_run_from_upload_to_show_analysis_and_search(test_client, analysis_finished_event, analysis_finished_counter):
     _rest_upload_firmware(test_client)
-    analysis_finished_event.wait(timeout=15)
+    assert analysis_finished_event.wait(timeout=15)
     analysis_finished_counter.value -= 4  # only one plugin to update
     analysis_finished_event.clear()
     _rest_get_analysis_result(test_client)
@@ -72,6 +72,6 @@ def test_run_from_upload_to_show_analysis_and_search(test_client, analysis_finis
     _rest_update_analysis_bad_analysis(test_client)
     _rest_update_analysis_success(test_client)
 
-    analysis_finished_event.wait(timeout=10)
+    assert analysis_finished_event.wait(timeout=10)
 
     _rest_check_new_analysis_exists(test_client)

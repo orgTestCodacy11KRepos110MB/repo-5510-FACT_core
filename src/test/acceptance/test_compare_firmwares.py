@@ -73,7 +73,7 @@ def test_compare_firmwares(test_fw_a, test_fw_c, test_client, analysis_finished_
     _show_analysis_without_compare_list(test_client, test_fw_a)
     _add_firmwares_to_compare(test_client, test_fw_a, test_fw_c)
     _start_compare(test_client)
-    comparison_finished_event.wait(timeout=20)
+    assert comparison_finished_event.wait(timeout=20)
     _show_comparison_results(test_client, test_fw_a, test_fw_c)
     _show_home_page(test_client)
     _show_compare_browse(test_client, test_fw_a)

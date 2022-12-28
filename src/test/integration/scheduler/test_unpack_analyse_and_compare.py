@@ -48,7 +48,7 @@ def test_unpack_analyse_and_compare(
 
     assert comparison_scheduler.add_task((compare_id, False)) is None, 'adding compare task creates error'
 
-    comparison_finished_event.wait(timeout=10)
+    assert comparison_finished_event.wait(timeout=10)
 
     result = comparison_db.get_comparison_result(compare_id)
 

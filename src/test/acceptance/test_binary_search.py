@@ -46,7 +46,7 @@ def _get_without_request_id(test_client):
 def test_binary_search(test_client, test_fw_a, analysis_finished_event):
     _query_page_get(test_client)
     upload_test_firmware(test_client, test_fw_a)
-    analysis_finished_event.wait(timeout=15)
+    assert analysis_finished_event.wait(timeout=15)
     _query_page_post_file_query(test_client)
     _query_page_post_firmware_query(test_client, test_fw_a)
     _get_without_request_id(test_client)

@@ -265,6 +265,10 @@ def analysis_finished_event() -> Event:
     """An event that is set once the :py:func:`analysis_scheduler` has analyzed
     :py:attribute:`SchedulerTestConfig.items_to_analyze` items.
 
+    .. note::
+
+        :py:func:`Event.wait` does not raise an exception if the timeout was reached.
+
     .. seealso::
 
        The documentation of :py:class:`SchedulerTestConfig`."""
@@ -393,6 +397,10 @@ def unpacking_scheduler(request, post_unpack_queue) -> UnpackingScheduler:
 def comparison_finished_event() -> Event:
     """The retunred event is set once the comparison_scheduler is finished comparing.
     Note that the event must be reset if you want to compare multiple firmwares in one test.
+
+    .. note::
+
+        :py:func:`Event.wait` does not raise an exception if the timeout was reached.
     """
     yield Event()
 

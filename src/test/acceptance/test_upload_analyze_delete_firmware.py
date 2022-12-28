@@ -103,7 +103,7 @@ def _delete_firmware(test_client, test_fw_a):
 def test_run_from_upload_via_show_analysis_to_delete(test_client, analysis_finished_event, test_fw_a):
     _upload_firmware_get(test_client)
     upload_test_firmware(test_client, test_fw_a)
-    analysis_finished_event.wait(timeout=15)
+    assert analysis_finished_event.wait(timeout=15)
     _show_analysis_page(test_client, test_fw_a)
     _show_analysis_details_file_type(test_client, test_fw_a)
     _check_ajax_file_tree_routes(test_client, test_fw_a)
