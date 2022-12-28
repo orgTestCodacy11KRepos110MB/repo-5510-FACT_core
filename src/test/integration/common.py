@@ -31,5 +31,8 @@ class MockDbInterface:
     def get_analysis(self, *_):
         pass
 
+    def add_analysis(self, *_):
+        pass
+
     def get_specific_fields_of_db_entry(self, uid, field_dict):
         pass
