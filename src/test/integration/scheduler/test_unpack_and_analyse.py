@@ -12,7 +12,9 @@ from test.integration.conftest import SchedulerIntegrationTestConfig
         pipeline=True,
     ),
 )
+@pytest.mark.skip(reason="TODO this hangs pytest")
 def test_unpack_and_analyse(analysis_scheduler, unpacking_scheduler, post_analysis_queue):
+    # TODO this test also hangs pytest.
     test_fw = Firmware(file_path=f'{get_test_data_dir()}/container/test.zip')
 
     unpacking_scheduler.add_task(test_fw)

@@ -12,7 +12,6 @@ _expected_result = {
 }
 
 
-# TODO this test passes but some background process is not stopped.
 @pytest.mark.SchedulerTestConfig(
     SchedulerIntegrationTestConfig(
         # 2 container with 3 files each and 2 plugins
@@ -22,6 +21,7 @@ _expected_result = {
         backend_db_class=BackendDbInterface,
     ),
 )
+@pytest.mark.skip(reason="TODO this test passes but some background process is not stopped.")
 def test_unpack_analyse_and_compare(
     backend_db,
     unpacking_scheduler,
