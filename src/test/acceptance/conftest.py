@@ -14,6 +14,11 @@ from test.conftest import SchedulerTestConfig
 from web_interface.frontend_main import WebFrontEnd
 
 
+@pytest.fixture(autouse=True)
+def _autouse_database_interfaces(database_interfaces):
+    pass
+
+
 @pytest.fixture
 def web_frontend():
     _web_frontend = WebFrontEnd()
