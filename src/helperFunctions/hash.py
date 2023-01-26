@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import contextlib
-import sys
 from hashlib import md5, new
 from shlex import split
 from subprocess import run
@@ -116,16 +114,3 @@ def normalize_lief_items(functions):
 class _StandardOutWriter:
     def write(self, _):
         pass
-
-
-@contextlib.contextmanager
-def _suppress_stdout():
-    '''A context manager that suppresses any output to stdout and stderr.'''
-    writer = _StandardOutWriter()
-
-    stdout, stderr = sys.stdout, sys.stderr
-    sys.stdout, sys.stderr = writer, writer
-
-    yield
-
-    sys.stdout, sys.stderr = stdout, stderr
