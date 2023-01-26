@@ -69,6 +69,7 @@ autodoc_mock_imports = [
     'distro',
     'docker',
     'docker-compose',
+    'elftools',
     'email-validator',
     'fact_helper_file',
     'flaky',
