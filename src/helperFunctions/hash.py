@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 from hashlib import md5, new
-from shlex import split
-from subprocess import run
 
 import ssdeep
 import tlsh
+from elftools.common.exceptions import ELFError
+from elftools.elf.elffile import ELFFile
 
 from helperFunctions.data_conversion import make_bytes
 
@@ -59,45 +60,27 @@ def get_imphash(file_object) -> str | None:
     :param file_object: The FileObject of which the imphash shall be computed
     '''
     if _is_elf_file(file_object):
-        functions = _get_list_of_imported_functions(file_object.file_path)
-        if functions:
-            return md5(','.join(sorted(functions)).encode()).hexdigest()
+        try:
+            functions = _get_list_of_imported_functions(file_object.file_path)
+            if functions:
+                return md5(','.join(sorted(functions)).encode()).hexdigest()
+        except Exception:  # pylint: disable=broad-except # we must not crash here as this is used by a mandatory plugin
+            logging.exception(f'Could not compute imphash for {file_object.file_path}')
     return None
 
 
 def _get_list_of_imported_functions(path: str) -> list[str]:
-    '''
-    Uses `readelf` from binutils to find all imported symbols in an ELF binary
-
-    :param path: The file path of the ELF file
-    :return: a list of all imported symbols
-    '''
-    output = run(split(f'readelf -sW {path}'), capture_output=True, text=True, check=False).stdout
-    symbols = []
-    for line in output.splitlines():
-        if 'FUNC' not in line:  # we only want functions not objects, etc.
-            continue
-        size, function = _parse_readelf_line(line)
-        if function and size == 0:  # size 0 -> imported function
-            if '@' in function:  # may look like <function_name>@<library> but we want only the function name
-                function = function[: function.find('@')]
-            if len(function) > 20:
-                function = f'{function[:17]}...'  # mimic lief (cut off long function names) to match old hashes
-            symbols.append(function)
-    return sorted(symbols)
-
-
-def _parse_readelf_line(line: str) -> tuple[int | None, str | None]:
-    '''
-    readelf -s output looks something like this (the last part is optional):
-       Num:    Value          Size Type    Bind   Vis      Ndx Name
-         5: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND free@GLIBC_2.2.5 (3)
-    '''
     try:
-        _, _, size, _, _, _, _, function, *_ = [w for w in line.split(' ') if w]
-        return int(size), function
-    except ValueError:
-        return None, None
+        with open(path, 'rb') as fp:
+            imports = [
+                s.name
+                for s in ELFFile(fp).get_section_by_name('.dynsym').iter_symbols()
+                if s.name and s.entry.st_info['type'] == 'STT_FUNC' and s.entry.st_size == 0  # size 0 -> imported
+            ]
+            # mimic lief (cut off long function names) to match old hashes
+            return sorted(f if len(f) <= 20 else f'{f[:17]}...' for f in imports)
+    except (ELFError, AttributeError):  # not an ELF file or no .dynsym section -> no imports
+        return []
 
 
 def _is_elf_file(file_object):

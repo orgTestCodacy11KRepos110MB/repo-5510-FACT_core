@@ -3,7 +3,15 @@
 import os
 from pathlib import Path
 
-from helperFunctions.hash import get_imphash, get_md5, get_sha256, get_ssdeep, get_tlsh, normalize_lief_items
+from helperFunctions.hash import (
+    _get_list_of_imported_functions,
+    get_imphash,
+    get_md5,
+    get_sha256,
+    get_ssdeep,
+    get_tlsh,
+    normalize_lief_items,
+)
 from test.common_helper import create_test_file_object, get_test_data_dir
 
 TEST_STRING = 'test string'
@@ -32,10 +40,17 @@ def test_imphash():
     assert len(imphash) == 32, 'imphash does not seem to be an md5'
 
 
+def test_get_list_of_imported_functions():
+    path = Path(get_test_data_dir()) / 'test_executable'
+    imports = _get_list_of_imported_functions(str(path))
+    assert isinstance(imports, list) and all(isinstance(f, str) for f in imports)
+    assert imports == ['__cxa_finalize', '__libc_start_main', 'printf']
+
+
 def test_imphash_bad_file():
     fo = create_test_file_object()
     fo.processed_analysis = {'file_type': {'mime': 'application/x-executable'}}
-    assert not get_imphash(fo)
+    assert get_imphash(fo) is None
 
 
 def test_normalize_items_from_strings():
