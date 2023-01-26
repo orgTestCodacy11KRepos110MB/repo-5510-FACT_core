@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import contextlib
-import logging
 import sys
 from hashlib import md5, new
+from shlex import split
+from subprocess import run
 
-import lief
 import ssdeep
 import tlsh
 
@@ -51,24 +53,53 @@ def get_tlsh_comparison(first, second):
     return tlsh.diff(first, second)  # pylint: disable=c-extension-no-member
 
 
-def get_imphash(file_object):
+def get_imphash(file_object) -> str | None:
     '''
-    Generates and returns the md5 hash of the imported functions of an ELF file
-    represented by `file_object`.
-    The imports are sorted before the hex is generated so the order of imports
-    does not matter.
+    Generates and returns the md5 hash of the (sorted) imported functions of an ELF file represented by `file_object`.
+    Returns `None` if there are no imports or if an exception occurs.
 
     :param file_object: The FileObject of which the imphash shall be computed
     '''
     if _is_elf_file(file_object):
-        try:
-            with _suppress_stdout():
-                # pylint: disable=c-extension-no-member
-                functions = normalize_lief_items(lief.parse(file_object.file_path).imported_functions)
+        functions = _get_list_of_imported_functions(file_object.file_path)
+        if functions:
             return md5(','.join(sorted(functions)).encode()).hexdigest()
-        except Exception:
-            logging.exception(f'Could not compute imphash for {file_object.file_path}')
     return None
+
+
+def _get_list_of_imported_functions(path: str) -> list[str]:
+    '''
+    Uses `readelf` from binutils to find all imported symbols in an ELF binary
+
+    :param path: The file path of the ELF file
+    :return: a list of all imported symbols
+    '''
+    output = run(split(f'readelf -sW {path}'), capture_output=True, text=True, check=False).stdout
+    symbols = []
+    for line in output.splitlines():
+        if 'FUNC' not in line:  # we only want functions not objects, etc.
+            continue
+        size, function = _parse_readelf_line(line)
+        if function and size == 0:  # size 0 -> imported function
+            if '@' in function:  # may look like <function_name>@<library> but we want only the function name
+                function = function[: function.find('@')]
+            if len(function) > 20:
+                function = f'{function[:17]}...'  # mimic lief (cut off long function names) to match old hashes
+            symbols.append(function)
+    return sorted(symbols)
+
+
+def _parse_readelf_line(line: str) -> tuple[int | None, str | None]:
+    '''
+    readelf -s output looks something like this (the last part is optional):
+       Num:    Value          Size Type    Bind   Vis      Ndx Name
+         5: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND free@GLIBC_2.2.5 (3)
+    '''
+    try:
+        _, _, size, _, _, _, _, function, *_ = [w for w in line.split(' ') if w]
+        return int(size), function
+    except ValueError:
+        return None, None
 
 
 def _is_elf_file(file_object):

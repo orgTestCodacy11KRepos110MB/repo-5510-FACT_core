@@ -3,15 +3,7 @@
 import os
 from pathlib import Path
 
-from helperFunctions.hash import (
-    _suppress_stdout,
-    get_imphash,
-    get_md5,
-    get_sha256,
-    get_ssdeep,
-    get_tlsh,
-    normalize_lief_items,
-)
+from helperFunctions.hash import get_imphash, get_md5, get_sha256, get_ssdeep, get_tlsh, normalize_lief_items
 from test.common_helper import create_test_file_object, get_test_data_dir
 
 TEST_STRING = 'test string'
@@ -69,19 +61,6 @@ def test_normalize_items_empty_list():
 
 def print_foo():
     print('foo', end='')
-
-
-def test_suppress_stdout(capsys):
-    print_foo()
-
-    without_decorator = capsys.readouterr()
-    assert without_decorator.out == 'foo'
-
-    with _suppress_stdout():
-        print_foo()
-
-    with_decorator = capsys.readouterr()
-    assert not with_decorator.out
 
 
 def test_get_tlsh():
