@@ -25,6 +25,8 @@ from storage.db_interface_base import DbInterfaceError
 from storage.fsorganizer import FSOrganizer
 from storage.unpacking_locks import UnpackingLockManager
 
+from plugins import analysis
+
 
 class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
     '''
@@ -97,6 +99,8 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         unpacking_locks=None,
     ):
         self.analysis_plugins = {}
+        self._plugin_runners = {}
+
         self._load_plugins()
         self.stop_condition = Value('i', 0)
         self.process_queue = Queue()
@@ -194,7 +198,21 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
                 # be missing dependencies. So if anything goes wrong we want to inform the user about it
                 logging.error(f'Could not import plugin {plugin_name} due to exception', exc_info=True)
             else:
-                self.analysis_plugins[plugin.AnalysisPlugin.NAME] = plugin.AnalysisPlugin()
+
+                PluginClass = plugin.AnalysisPlugin
+                if issubclass(PluginClass, analysis.PluginV1):
+                    plugin = PluginClass()
+                    self.analysis_plugins[plugin.metadata.name] = plugin
+                    config = analysis.PluginRunner.Config(
+                        process_count=1,
+                        delay=1,
+                        timeout=1,
+                    )
+                    runner = analysis.PluginRunner(plugin, config)
+                    self._plugin_runners[plugin.metadata.name] = runner
+                    runner.start()
+                elif issubclass(PluginClass, AnalysisBasePlugin):
+                    self.analysis_plugins[PluginClass.NAME] = PluginClass()
 
     def get_plugin_dict(self) -> dict:
         '''
@@ -307,7 +325,12 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         else:
             if file_object.binary is None:
                 self._set_binary(file_object)
-            self.analysis_plugins[analysis_to_do].add_job(file_object)
+            plugin = self.analysis_plugins[analysis_to_do]
+            if isinstance(plugin, analysis.PluginV1):
+                runner = self._plugin_runners[plugin.metadata.name]
+                runner.queue_analysis(file_object)
+            elif isinstance(plugin, AnalysisBasePlugin):
+                plugin.add_job(file_object)
 
     def _set_binary(self, file_object: FileObject):
         # the file_object.binary may be missing in case of an update
@@ -336,7 +359,10 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         return self._analysis_is_up_to_date(db_entry, self.analysis_plugins[analysis_to_do], uid)
 
     def _analysis_is_up_to_date(self, db_entry: dict, analysis_plugin: AnalysisBasePlugin, uid: str) -> bool:
-        current_system_version = getattr(analysis_plugin, 'SYSTEM_VERSION', None)
+        # Does not work with the Mixin because of getattr
+        # current_system_version = getattr(analysis_plugin, 'SYSTEM_VERSION', None)
+        current_system_version = None
+
         try:
             if self._current_version_is_newer(analysis_plugin.VERSION, current_system_version, db_entry):
                 return False
@@ -412,8 +438,11 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         return blacklist, whitelist
 
     def _get_blacklist_and_whitelist_from_plugin(self, analysis_plugin: str) -> tuple[list, list]:
-        blacklist = getattr(self.analysis_plugins[analysis_plugin], 'MIME_BLACKLIST', [])
-        whitelist = getattr(self.analysis_plugins[analysis_plugin], 'MIME_WHITELIST', [])
+        # Does not work with MIXIN
+        # blacklist = getattr(self.analysis_plugins[analysis_plugin], 'MIME_BLACKLIST', [])
+        # whitelist = getattr(self.analysis_plugins[analysis_plugin], 'MIME_WHITELIST', [])
+        blacklist = []
+        whitelist = []
         return blacklist, whitelist
 
     # ---- result collector functions ----
@@ -427,11 +456,18 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         while self.stop_condition.value == 0:
             nop = True
             for plugin_name, plugin in self.analysis_plugins.items():
+                if isinstance(plugin, analysis.PluginV1):
+                    runner = self._plugin_runners[plugin.metadata.name]
+                    out_queue = runner.out_queue
+                elif isinstance(plugin, AnalysisBasePlugin):
+                    out_queue = plugin.out_queue
+
                 try:
-                    fw = plugin.out_queue.get_nowait()
+                    fw = out_queue.get_nowait()
                 except (Empty, ValueError):
                     pass
                 else:
+                    # This needs a major rework, we don't have access to the FileObject here
                     nop = False
                     if plugin_name in fw.processed_analysis:
                         if fw.analysis_exception:
@@ -452,7 +488,8 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
     # ---- miscellaneous functions ----
 
     def get_combined_analysis_workload(self):
-        return self.process_queue.qsize() + sum(plugin.in_queue.qsize() for plugin in self.analysis_plugins.values())
+        return 0
+        #return self.process_queue.qsize() + sum(plugin.in_queue.qsize() for plugin in self.analysis_plugins.values())
 
     def get_scheduled_workload(self) -> dict:
         '''
@@ -483,6 +520,8 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
             'recently_finished_analyses': dict(self.status.recently_finished),
         }
         for plugin_name, plugin in self.analysis_plugins.items():
+            if isinstance(plugin, analysis.PluginV1):
+                continue
             workload['plugins'][plugin_name] = {
                 'queue': plugin.in_queue.qsize(),
                 'active': (sum(plugin.active[i].value for i in range(plugin.thread_count))),
@@ -505,6 +544,8 @@ class AnalysisScheduler:  # pylint: disable=too-many-instance-attributes
         :return: Boolean value stating if any attached process ran into an exception
         '''
         for _, plugin in self.analysis_plugins.items():
+            if isinstance(plugin, analysis.PluginV1):
+                continue
             if plugin.check_exceptions():
                 return True
         return check_worker_exceptions([self.schedule_process, self.result_collector_process], 'Scheduler')
